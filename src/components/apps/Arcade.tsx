@@ -25,7 +25,7 @@ export default function Arcade() {
                     <div className="absolute inset-0 bg-black/20" />
                     <div className="relative z-10 flex items-end justify-between">
                         <div>
-                            <div className="text-sm font-bold uppercase tracking-widest text-white/80 mb-2">Editor's Choice</div>
+                            <div className="text-sm font-bold uppercase tracking-widest text-white/80 mb-2">Editor&apos;s Choice</div>
                             <h1 className="text-5xl font-extrabold mb-4 drop-shadow-lg">Retro Racer</h1>
                             <p className="text-lg text-white/90 max-w-xl">Experience the thrill of 8-bit racing in this remastered classic optimized for modern displays.</p>
                         </div>
