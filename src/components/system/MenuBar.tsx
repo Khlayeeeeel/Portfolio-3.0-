@@ -9,12 +9,14 @@ import {
     Volume2,
     LayoutGrid
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 export default function MenuBar() {
-    const [time, setTime] = useState(new Date());
+    const [mounted, setMounted] = useState(false);
+    const [time, setTime] = useState<Date | null>(null);
 
     useEffect(() => {
+        setMounted(true);
+        setTime(new Date());
         const timer = setInterval(() => setTime(new Date()), 1000);
         return () => clearInterval(timer);
     }, []);
@@ -64,8 +66,8 @@ export default function MenuBar() {
                 <div className="px-1 hover:bg-white/20 rounded transition-colors cursor-default">
                     <LayoutGrid size={16} />
                 </div>
-                <div className="px-2 hover:bg-white/20 rounded transition-colors cursor-default font-medium">
-                    {formatTime(time)}
+                <div className="px-2 hover:bg-white/20 rounded transition-colors cursor-default font-medium min-w-[120px] text-right">
+                    {mounted && time ? formatTime(time) : ""}
                 </div>
             </div>
         </div>
