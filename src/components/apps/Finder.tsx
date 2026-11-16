@@ -24,9 +24,23 @@ import {
     Save,
     RotateCcw,
     HardDrive,
-    Sparkles
+    EyeOff,
+    Lock
 } from "lucide-react";
 import { useFileSystemStore, FSItem, FSItemType } from "@/stores/fileSystemStore";
+import { useCTFStore } from "@/stores/ctfStore";
+import { useWindowStore } from "@/stores/windowStore";
+import { isVisible } from "@/lib/ctf-visibility";
+import { applyChallengeSuccess } from "@/lib/ctf-actions";
+import { FINAL_PHOTO_CLUE } from "@/lib/ctf-content";
+import PasswordModal from "@/components/ctf/PasswordModal";
+
+const formatFileSize = (bytes: number): string =>
+    bytes < 1024
+        ? `${bytes} B`
+        : bytes < 1024 * 1024
+          ? `${(bytes / 1024).toFixed(1)} KB`
+          : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
 export default function Finder() {
     const {
@@ -51,6 +65,9 @@ export default function Finder() {
         resetToDefault,
     } = useFileSystemStore();
 
+    const { stage, showHidden, unlockedFiles, advanceStage } = useCTFStore();
+    const { openWindow } = useWindowStore();
+
     // UI state
     const [mounted, setMounted] = useState(false);
     const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -58,6 +75,7 @@ export default function Finder() {
     const [renameValue, setRenameValue] = useState("");
     const [activeFile, setActiveFile] = useState<FSItem | null>(null);
     const [editorContent, setEditorContent] = useState("");
+    const [pendingUnlock, setPendingUnlock] = useState<FSItem | null>(null);
     const [isCreatingFolder, setIsCreatingFolder] = useState(false);
     const [newFolderName, setNewFolderName] = useState("");
     const [isCreatingFile, setIsCreatingFile] = useState(false);
@@ -70,6 +88,8 @@ export default function Finder() {
     useEffect(() => {
         setMounted(true);
     }, []);
+
+    const isUnlocked = (item: FSItem) => !item.locked || unlockedFiles.includes(item.id);
 
     // Current folder item
     const currentFolder = items[currentFolderId] || items.desktop;
@@ -85,23 +105,33 @@ export default function Finder() {
         return path;
     }, [currentFolder, items]);
 
-    // Items inside current folder (filtered by search query if any)
+    // Items inside current folder: progression gate + dot-file toggle + search
     const folderItems = useMemo(() => {
-        const list = Object.values(items).filter((item) => item.parentId === currentFolderId);
+        const list = Object.values(items).filter(
+            (item) =>
+                item.parentId === currentFolderId &&
+                isVisible(item, { stage, showHidden })
+        );
         if (!searchQuery.trim()) return list;
         const q = searchQuery.toLowerCase();
         return list.filter((item) => item.name.toLowerCase().includes(q));
-    }, [items, currentFolderId, searchQuery]);
+    }, [items, currentFolderId, searchQuery, stage, showHidden]);
 
-    // Sidebar Favorite Folders
-    const favorites = [
-        { id: "desktop", name: "Desktop", icon: "💻" },
-        { id: "documents", name: "Documents", icon: "📄" },
-        { id: "downloads", name: "Downloads", icon: "📥" },
-        { id: "applications", name: "Applications", icon: "🚀" },
-        { id: "pictures", name: "Pictures", icon: "🖼️" },
-        { id: "trash", name: "Trash", icon: "🗑️" },
-    ];
+    // Sidebar favourites: only folders that both exist and are revealed
+    const favorites = useMemo(() => {
+        const base = [
+            { id: "desktop", name: "Desktop", icon: "💻" },
+            { id: "documents", name: "Documents", icon: "📄" },
+            { id: "downloads", name: "Downloads", icon: "📥" },
+            { id: "classified-folder", name: "Classified", icon: "🗂️" },
+            { id: "logs-folder", name: "Logs", icon: "🧾" },
+            { id: "trash", name: "Trash", icon: "🗑️" },
+        ];
+        return base.filter((fav) => {
+            const item = items[fav.id];
+            return !!item && isVisible(item, { stage, showHidden });
+        });
+    }, [items, stage, showHidden]);
 
     // Get item icon based on type
     const getItemIcon = (type: FSItemType, size: number = 36) => {
@@ -121,20 +151,32 @@ export default function Finder() {
         }
     };
 
-    // Item count helpers
+    // Item count helpers (visible children only)
     const getFolderChildCount = (folderId: string) => {
-        return Object.values(items).filter((i) => i.parentId === folderId).length;
+        return Object.values(items).filter(
+            (i) => i.parentId === folderId && isVisible(i, { stage, showHidden })
+        ).length;
     };
 
-    // Double click handler
+    // Double click handler: locked files never open, they ask for the password
     const handleDoubleClick = (item: FSItem) => {
+        if (!isVisible(item, { stage, showHidden })) return;
+
+        if (!isUnlocked(item)) {
+            setPendingUnlock(item);
+            return;
+        }
+
         if (item.type === "folder") {
             setCurrentFolder(item.id);
-        } else {
-            // Open File Editor/Viewer Modal
-            setActiveFile(item);
-            setEditorContent(item.content || "");
+            return;
         }
+
+        // Reading the log is what opens the hidden evidence stage.
+        if (item.id === "last-activity-log") advanceStage(6);
+
+        setActiveFile(item);
+        setEditorContent(item.content || "");
     };
 
     // Trigger file download
@@ -159,7 +201,7 @@ export default function Finder() {
         Array.from(files).forEach((file) => {
             const reader = new FileReader();
             const ext = file.name.split(".").pop()?.toLowerCase() || "";
-            
+
             let itemType: FSItemType = "file";
             if (["png", "jpg", "jpeg", "webp", "gif", "svg"].includes(ext)) itemType = "image";
             else if (["txt", "md", "json", "csv", "log"].includes(ext)) itemType = "text";
@@ -348,7 +390,11 @@ export default function Finder() {
 
                         {selectedItemIds.length > 0 && (
                             <button
-                                onClick={() => selectedItemIds.forEach((id) => deleteItem(id))}
+                                onClick={() =>
+                                    selectedItemIds
+                                        .filter((id) => items[id] && isVisible(items[id], { stage, showHidden }))
+                                        .forEach((id) => deleteItem(id))
+                                }
                                 className="flex items-center gap-1 px-2 py-1 hover:bg-red-500 hover:text-white rounded text-xs font-medium text-red-600 dark:text-red-400 transition"
                                 title="Delete Selected"
                             >
@@ -430,9 +476,19 @@ export default function Finder() {
                         </div>
                     </div>
 
-                    <div className="p-2 bg-blue-500/10 border border-blue-500/20 rounded-xl text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                        <Sparkles size={16} className="flex-shrink-0" />
-                        <span>Full file access active! Double click to view/edit.</span>
+                    <div
+                        className={`p-2 border rounded-xl text-[11px] flex items-center gap-2 ${
+                            showHidden
+                                ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                                : "bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400"
+                        }`}
+                    >
+                        {showHidden ? <Eye size={16} className="flex-shrink-0" /> : <EyeOff size={16} className="flex-shrink-0" />}
+                        <span>
+                            {showHidden
+                                ? "Hidden files shown. Ctrl/Cmd + Shift + . to hide them again."
+                                : "Hidden files are hidden. Ctrl/Cmd + Shift + . to reveal dot-files."}
+                        </span>
                     </div>
                 </div>
 
@@ -510,6 +566,7 @@ export default function Finder() {
                         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
                             {folderItems.map((item) => {
                                 const isSelected = selectedItemIds.includes(item.id);
+                                const locked = !isUnlocked(item);
                                 return (
                                     <div
                                         key={item.id}
@@ -528,8 +585,13 @@ export default function Finder() {
                                                 : "border-transparent hover:bg-black/5 dark:hover:bg-white/5"
                                         }`}
                                     >
-                                        <div className="mb-2 transition-transform group-hover:scale-105">
+                                        <div className="mb-2 transition-transform group-hover:scale-105 relative">
                                             {getItemIcon(item.type, 44)}
+                                            {locked && (
+                                                <span className="absolute -right-1 -bottom-1 rounded-full bg-zinc-900/90 p-0.5">
+                                                    <Lock size={10} className="text-amber-300" />
+                                                </span>
+                                            )}
                                         </div>
 
                                         {renamingId === item.id ? (
@@ -546,7 +608,7 @@ export default function Finder() {
                                             <span
                                                 className={`text-xs text-center line-clamp-2 break-all max-w-full font-medium ${
                                                     isSelected ? "text-blue-600 dark:text-blue-400 font-semibold" : ""
-                                                }`}
+                                                } ${item.hidden ? "opacity-60 italic" : ""}`}
                                             >
                                                 {item.name}
                                             </span>
@@ -570,6 +632,7 @@ export default function Finder() {
                                 <tbody>
                                     {folderItems.map((item) => {
                                         const isSelected = selectedItemIds.includes(item.id);
+                                        const locked = !isUnlocked(item);
                                         return (
                                             <tr
                                                 key={item.id}
@@ -590,6 +653,8 @@ export default function Finder() {
                                             >
                                                 <td className="py-2 pl-2 flex items-center gap-2">
                                                     {getItemIcon(item.type, 18)}
+                                                    {item.hidden && <EyeOff size={12} className="text-gray-400" />}
+                                                    {locked && <Lock size={12} className="text-amber-500" />}
                                                     {renamingId === item.id ? (
                                                         <input
                                                             type="text"
@@ -643,7 +708,7 @@ export default function Finder() {
                             >
                                 <Edit3 size={14} /> Rename
                             </button>
-                            {contextMenu.item.type !== "folder" && (
+                            {contextMenu.item.type !== "folder" && !contextMenu.item.locked && (
                                 <button
                                     onClick={() => {
                                         handleDownloadFile(contextMenu.item!);
@@ -699,8 +764,26 @@ export default function Finder() {
                 </div>
             )}
 
-            {/* File Text Editor / Previewer Modal */}
-            {activeFile && (
+            {/* Locked file prompt */}
+            {pendingUnlock && (
+                <PasswordModal
+                    isOpen
+                    challenge={pendingUnlock.challenge ?? "classified_file"}
+                    fileName={pendingUnlock.name}
+                    clue={pendingUnlock.challenge === "final_photo" ? FINAL_PHOTO_CLUE : undefined}
+                    onSuccess={(data) => {
+                        applyChallengeSuccess(pendingUnlock, data);
+                        // Only now may the content be shown.
+                        setActiveFile(pendingUnlock);
+                        setEditorContent(pendingUnlock.content || "");
+                        setPendingUnlock(null);
+                    }}
+                    onClose={() => setPendingUnlock(null)}
+                />
+            )}
+
+            {/* File Text Editor / Previewer Modal (unlocked files only) */}
+            {activeFile && isUnlocked(activeFile) && (
                 <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-6">
                     <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-700 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col h-[500px] overflow-hidden">
                         {/* Modal Header */}
@@ -708,7 +791,9 @@ export default function Finder() {
                             <div className="flex items-center gap-2">
                                 {getItemIcon(activeFile.type, 20)}
                                 <span className="font-semibold text-sm">{activeFile.name}</span>
-                                <span className="text-xs text-gray-400">({activeFile.size || "0 B"})</span>
+                                <span className="text-xs text-gray-400">
+                                    ({formatFileSize(new Blob([activeFile.content || ""]).size)})
+                                </span>
                             </div>
                             <div className="flex items-center gap-2">
                                 {activeFile.type !== "image" && (
@@ -733,14 +818,34 @@ export default function Finder() {
 
                         {/* Modal Body */}
                         <div className="flex-1 p-4 overflow-auto bg-gray-50/50 dark:bg-zinc-900">
-                            {activeFile.type === "image" && activeFile.content ? (
-                                <div className="h-full flex items-center justify-center">
-                                    <img
-                                        src={activeFile.content}
-                                        alt={activeFile.name}
-                                        className="max-h-full max-w-full object-contain rounded-lg shadow-md"
-                                    />
-                                </div>
+                            {activeFile.type === "image" ? (
+                                activeFile.content?.startsWith("data:") ? (
+                                    <div className="h-full flex items-center justify-center">
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
+                                            src={activeFile.content}
+                                            alt={activeFile.name}
+                                            className="max-h-full max-w-full object-contain rounded-lg shadow-md"
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="h-full flex flex-col items-center justify-center gap-3 text-center text-gray-500 dark:text-zinc-400">
+                                        <ImageIcon size={48} strokeWidth={1} className="opacity-50" />
+                                        <p className="text-sm font-medium">Protected evidence</p>
+                                        <p className="max-w-sm text-xs">
+                                            This image is streamed through the protected evidence viewer.
+                                        </p>
+                                        <button
+                                            onClick={() => {
+                                                setActiveFile(null);
+                                                openWindow("photos", "Photos", "photos");
+                                            }}
+                                            className="rounded-md bg-blue-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-600"
+                                        >
+                                            Open Photos
+                                        </button>
+                                    </div>
+                                )
                             ) : (
                                 <textarea
                                     value={editorContent}

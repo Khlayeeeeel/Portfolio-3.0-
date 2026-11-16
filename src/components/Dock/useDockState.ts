@@ -3,12 +3,8 @@ import { persist } from "zustand/middleware";
 
 export const DEFAULT_DOCK_ORDER = [
     "finder",
-    "safari",
     "terminal",
-    "notes",
-    "photos",
-    "preferences",
-    "arcade"
+    "photos"
 ];
 
 interface DockStore {
@@ -25,6 +21,9 @@ export const useDockState = create<DockStore>()(
         }),
         {
             name: "mac-dock-storage",
+            version: 2,
+            // Old saved orders may still list apps that are no longer on the dock.
+            migrate: () => ({ dockItemIds: DEFAULT_DOCK_ORDER }),
         }
     )
 );

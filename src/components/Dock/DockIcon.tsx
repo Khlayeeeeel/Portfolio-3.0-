@@ -35,20 +35,22 @@ export default function DockIcon({
     const { openWindow, windows } = useWindowStore();
     const isRunning = windows.some((w) => w.id === id && w.isOpen);
 
-    const handleClick = async () => {
-        setIsBouncing(true);
-        await controls.start({
-            y: [0, -24, 0],
-            transition: { duration: 0.6, ease: "easeInOut" }
-        });
-        setIsBouncing(false);
+    const handleClick = () => {
+        // Open first: the window must never wait for a cosmetic animation.
         openWindow(id, name, id); // Fallback icon ID
+        setIsBouncing(true);
+        controls
+            .start({
+                y: [0, -24, 0],
+                transition: { duration: 0.6, ease: "easeInOut" },
+            })
+            .catch(() => undefined)
+            .finally(() => setIsBouncing(false));
     };
 
     const onRightClick = (e: React.MouseEvent) => {
         e.preventDefault();
         // Context menu placeholder for future expansion
-        console.log(`Right clicked ${name}`);
     };
 
     const indicatorVariants = {

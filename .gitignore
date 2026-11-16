@@ -67,3 +67,10 @@ cypress/videos/
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# Extra env patterns (the example file stays tracked)
+.env*
+!.env.local.example
+
+# TypeScript incremental build info
+tsconfig.tsbuildinfo

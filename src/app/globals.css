@@ -80,3 +80,43 @@ body {
     transform: rotate(360deg);
   }
 }
+/* ---------------------------------------------------------------------------
+   CTF feedback animations
+   ------------------------------------------------------------------------- */
+@keyframes igc-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-8px); }
+  40% { transform: translateX(8px); }
+  60% { transform: translateX(-5px); }
+  80% { transform: translateX(5px); }
+}
+.animate-shake { animation: igc-shake 0.45s ease-in-out; }
+
+@keyframes igc-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: igc-fade-in 0.4s ease-out both; }
+
+@keyframes igc-glitch {
+  0% { transform: translate(0); }
+  20% { transform: translate(-2px, 1px); }
+  40% { transform: translate(2px, -1px); }
+  60% { transform: translate(-1px, -1px); }
+  80% { transform: translate(1px, 1px); }
+  100% { transform: translate(0); }
+}
+.glitch-text {
+  animation: igc-glitch 0.45s steps(2, end) infinite;
+  text-shadow: 2px 0 rgba(255, 0, 60, 0.55), -2px 0 rgba(0, 255, 255, 0.3);
+}
+
+@keyframes igc-scan {
+  from { background-position: 0 0; }
+  to { background-position: 0 8px; }
+}
+.scanlines {
+  background-image: repeating-linear-gradient(0deg, rgba(255, 0, 60, 0.08) 0 1px, transparent 1px 4px);
+  background-size: 100% 8px;
+  animation: igc-scan 0.6s linear infinite;
+}
