@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash, timingSafeEqual } from "crypto";
 import { storeToken } from "@/lib/ctf-tokens";
-import { issueUnlockProof } from "@/lib/ctf-proof";
-import { attemptLimit, checkRateLimit, clientIp, RATE_LIMIT } from "@/lib/rate-limit";
+import { issueUnlockProof, verifyUnlockProof } from "@/lib/ctf-proof";
+import {
+    attemptLimit,
+    checkMemberRateLimit,
+    checkRateLimit,
+    clearMemberRateLimit,
+    clientIp,
+    RATE_LIMIT,
+} from "@/lib/rate-limit";
 
 // ---------------------------------------------------------------------------
 // Normalisation helpers
@@ -70,6 +78,26 @@ function matches(answer: unknown, expected: string | undefined): boolean {
   return normalise(answer) === normalise(expected);
 }
 
+/**
+ * Member name: lowercase, no diacritics, trimmed, inner whitespace collapsed.
+ * The image-based challenges keep `normalise` (no whitespace collapsing).
+ */
+function normaliseName(raw: string): string {
+  return normalise(raw).replace(/\s+/g, " ");
+}
+
+const digestName = (raw: string) => createHash("sha256").update(normaliseName(raw)).digest();
+
+/** Constant-time comparison over fixed-length digests, with no plaintext fallback. */
+function matchesName(answer: unknown, variants: string[]): boolean {
+  if (typeof answer !== "string") return false;
+  const submitted = digestName(answer);
+  return variants.some((variant) => {
+    const expected = digestName(variant);
+    return submitted.length === expected.length && timingSafeEqual(submitted, expected);
+  });
+}
+
 function missingConfig(): NextResponse {
   return NextResponse.json(
     { ok: false, error: "Server misconfiguration." },
@@ -77,10 +105,10 @@ function missingConfig(): NextResponse {
   );
 }
 
-function tooManyAttempts(): NextResponse {
+function tooManyAttempts(retryAfter: number = RATE_LIMIT.windowMs / 1000): NextResponse {
   return NextResponse.json(
     { ok: false, error: "Too many attempts. Try again in a minute." },
-    { status: 429, headers: { "Retry-After": String(RATE_LIMIT.windowMs / 1000) } }
+    { status: 429, headers: { "Retry-After": String(Math.max(1, retryAfter)) } }
   );
 }
 
@@ -94,6 +122,8 @@ export async function POST(req: NextRequest) {
     challenge: string;
     answer?: string;
     fields?: { date: string; time: string; location: string };
+    /** Server-signed proof issued by final_photo (never an answer or hash). */
+    proof?: string;
   };
 
   try {
@@ -105,7 +135,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { challenge, answer, fields } = body;
+  // `null` (and arrays) are valid JSON but not valid request objects: without
+  // this guard the destructuring below throws and Next returns a 500.
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ ok: false, error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  const { challenge, answer, fields, proof } = body;
   const maxAttempts = attemptLimit();
 
   // Per challenge per client. three_fields is handled inside its own case so
@@ -200,31 +236,69 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, field: failedField });
       }
 
-      // Gallery token: one fetch each for evidence_01 and evidence_02.
+      // Gallery token: the recovered hint frame (internal id 1, shown as
+      // hints.jpg). The proof lets the client mint a new one if a refresh
+      // burns the token before the image made it to IndexedDB.
       const token = crypto.randomUUID();
-      storeToken(token, [1, 2]);
-      return NextResponse.json({ ok: true, token });
+      storeToken(token, [1]);
+      return NextResponse.json({ ok: true, token, galleryProof: issueUnlockProof("gallery") });
     }
 
     // ---- final_photo -------------------------------------------------------
     case "final_photo": {
-      const expected = process.env.CTF_TECH_ASSISTANT;
-      if (!expected) return missingConfig();
+      // Comma-separated accepted spellings (e.g. first name, full name). The
+      // answer itself lives only in the server environment.
+      const configured = process.env.CTF_MEMBER_NAME;
+      if (!configured) return missingConfig();
+      const variants = configured.split(",").map((v) => v.trim()).filter(Boolean);
+      if (variants.length === 0) return missingConfig();
       if (typeof answer !== "string") {
         return NextResponse.json(
           { ok: false, error: "Missing answer." },
           { status: 400 }
         );
       }
-      if (!matches(answer, expected)) {
+
+      // Dedicated bucket with escalating cooldown, independent from the other
+      // challenges so normal play is never refused.
+      const limit = checkMemberRateLimit(ip);
+      if (!limit.allowed) return tooManyAttempts(limit.retryAfter);
+
+      if (!matchesName(answer, variants)) {
         return NextResponse.json({ ok: false });
       }
+      clearMemberRateLimit(ip);
 
-      // Single-use token for evidence_03, plus a server-signed proof that can
-      // mint a replacement token after a refresh consumed the original one.
+      // Single-use token for evidence_03 (the sharp photo), plus a server-signed
+      // proof that can mint a replacement after a refresh consumed the token.
       const token = crypto.randomUUID();
       storeToken(token, [3]);
       return NextResponse.json({ ok: true, token, proof: issueUnlockProof("3") });
+    }
+
+    // ---- final_flag (stage 8) ----------------------------------------------
+    // Only reachable after final_photo: the request must carry the opaque,
+    // server-signed proof issued by that challenge. No client-side flag or
+    // stage value is ever trusted. Uses the same normalisation and rate limit
+    // as the other single-answer challenges.
+    case "final_flag": {
+      const expected = process.env.CTF_FINAL;
+      if (!expected) return missingConfig();
+
+      if (!verifyUnlockProof(proof, "3")) {
+        return NextResponse.json(
+          { ok: false, error: "Final photo verification required." },
+          { status: 403 }
+        );
+      }
+
+      if (typeof answer !== "string") {
+        return NextResponse.json(
+          { ok: false, error: "Missing answer." },
+          { status: 400 }
+        );
+      }
+      return NextResponse.json({ ok: matches(answer, expected) });
     }
 
     // ---- unknown -----------------------------------------------------------

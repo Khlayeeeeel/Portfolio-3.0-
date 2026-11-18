@@ -23,6 +23,7 @@ interface Bucket {
 const globalStore = globalThis as unknown as {
   __igcRateBuckets?: Map<string, Bucket>;
   __igcRatePurge?: number;
+  __igcMemberBuckets?: Map<string, MemberBucket>;
 };
 const buckets: Map<string, Bucket> =
   globalStore.__igcRateBuckets ?? (globalStore.__igcRateBuckets = new Map());
@@ -31,7 +32,7 @@ let lastPurge = globalStore.__igcRatePurge ?? 0;
 function purgeExpired(now: number): void {
   if (now - lastPurge < RATE_LIMIT.windowMs) return;
   lastPurge = now;
-  globalStore.__igcRatePurge = now;
+  globalStore.__igcRatePurge = lastPurge;
   buckets.forEach((bucket, key) => {
     if (now > bucket.resetAt) buckets.delete(key);
   });
@@ -83,4 +84,61 @@ export function checkRateLimit(key: string, maxAttempts: number = RATE_LIMIT.max
 
   bucket.count += 1;
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Strict, escalating limit for the member-identification challenge.
+// ---------------------------------------------------------------------------
+
+/** Delays in seconds applied after N consecutive failures (index = failures so far). */
+const MEMBER_BACKOFF_SECONDS = [0, 0, 0, 0, 30, 60, 120, 300, 600] as const;
+const MEMBER_DECAY_MS = 15 * 60_000;
+
+interface MemberBucket {
+  failures: number;
+  updatedAt: number;
+  blockedUntil: number;
+}
+
+const memberBuckets: Map<string, MemberBucket> =
+  globalStore.__igcMemberBuckets ?? (globalStore.__igcMemberBuckets = new Map());
+
+function memberKey(ip: string): string {
+  return `${ip}:member_identification`;
+}
+
+/**
+ * Registers one identification attempt. Returns the remaining cooldown in
+ * seconds when the attempt is refused, so the route can send `Retry-After`.
+ */
+export function checkMemberRateLimit(ip: string): { allowed: boolean; retryAfter: number } {
+  const now = Date.now();
+  const key = memberKey(ip);
+  const bucket = memberBuckets.get(key) ?? { failures: 0, updatedAt: now, blockedUntil: 0 };
+
+  if (now < bucket.blockedUntil) {
+    memberBuckets.set(key, bucket);
+    return { allowed: false, retryAfter: Math.ceil((bucket.blockedUntil - now) / 1000) };
+  }
+
+  if (now - bucket.updatedAt > MEMBER_DECAY_MS) bucket.failures = 0;
+
+  const delay = MEMBER_BACKOFF_SECONDS[
+    Math.min(bucket.failures, MEMBER_BACKOFF_SECONDS.length - 1)
+  ];
+  bucket.failures += 1;
+  bucket.updatedAt = now;
+  memberBuckets.set(key, bucket);
+
+  if (delay > 0) {
+    bucket.blockedUntil = now + delay * 1000;
+    return { allowed: false, retryAfter: delay };
+  }
+
+  return { allowed: true, retryAfter: 0 };
+}
+
+/** A correct answer clears the escalating penalty for this client. */
+export function clearMemberRateLimit(ip: string): void {
+  memberBuckets.delete(memberKey(ip));
 }

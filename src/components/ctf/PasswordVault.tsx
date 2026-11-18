@@ -16,11 +16,11 @@ const blobToDataUrl = (blob: Blob) =>
     });
 
 /**
- * The gallery token is single use, so both frames are pulled (and persisted)
- * right away: a later reload must not find an evidence token that is already spent.
+ * The gallery token is single use, so the remaining hint frame is pulled (and
+ * persisted) right away: a later reload must not find a spent evidence token.
  */
 async function prefetchGallery(token: string): Promise<void> {
-    for (const id of [1, 2]) {
+    for (const id of [1]) {
         try {
             const res = await fetch(`/api/ctf/evidence/${id}?token=${encodeURIComponent(token)}`);
             if (!res.ok) continue;
@@ -52,6 +52,7 @@ export default function PasswordVault() {
     const [solved, setSolved] = useState(false);
 
     const setGalleryToken = useCTFStore((s) => s.setGalleryToken);
+    const setGalleryProof = useCTFStore((s) => s.setGalleryProof);
     const advanceStage = useCTFStore((s) => s.advanceStage);
     const stage = useCTFStore((s) => s.stage);
 
@@ -83,6 +84,7 @@ export default function PasswordVault() {
                     setGalleryToken(data.token);
                     void prefetchGallery(data.token);
                 }
+                if (data.galleryProof) setGalleryProof(data.galleryProof);
                 advanceStage(5);
                 setSolved(true);
             } else {

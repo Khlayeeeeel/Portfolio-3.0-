@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Generates the three placeholder evidence frames without any dependency.
+ * Generates three placeholder evidence frames without any dependency.
  *
- * evidence_01 is heavily blurred, evidence_02 is partially blurred and
- * evidence_03 is sharp: replace them with your own JPEGs (same file names) and
- * the evidence route will serve your files instead.
+ * Output goes to private-assets/placeholders/ so it can NEVER overwrite the
+ * real evidence_01.jpg (shown as hints.jpg) / evidence_03.png served by the
+ * route. The hint frame is heavily blurred; evidence_03 is sharp. The retired
+ * second frame is no longer generated.
  *
  *   node scripts/generate-evidence.js
  */
@@ -197,14 +198,13 @@ function finish(pixels) {
     return out;
 }
 
-// --- Write the three frames ------------------------------------------------
+// --- Write the two live frames ---------------------------------------------
 const OUTPUTS = [
-    { file: "evidence_01.png", radius: 14, passes: 3 },
-    { file: "evidence_02.png", radius: 5, passes: 2 },
+    { file: "hints.png", radius: 14, passes: 3 },
     { file: "evidence_03.png", radius: 0, passes: 0 },
 ];
 
-const directory = path.join(__dirname, "..", "private-assets");
+const directory = path.join(__dirname, "..", "private-assets", "placeholders");
 fs.mkdirSync(directory, { recursive: true });
 
 const scene = makeScene();

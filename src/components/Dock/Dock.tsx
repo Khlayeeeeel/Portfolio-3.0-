@@ -2,13 +2,7 @@
 
 import { motion, useMotionValue, Reorder, AnimatePresence } from "framer-motion";
 import { useEffect, useState } from "react";
-import {
-    Folder,
-    Terminal,
-    Camera,
-    Trash2,
-    Lock
-} from "lucide-react";
+import { Camera, Eye, Folder, KeyRound, Lock, Terminal, Trash2 } from "lucide-react";
 import { useDockState } from "./useDockState";
 import { useCTFStore } from "@/stores/ctfStore";
 import DockIcon from "./DockIcon";
@@ -28,6 +22,10 @@ export default function Dock() {
     const { dockItemIds, reorderDockItems } = useDockState();
     const [isVisible, setIsVisible] = useState(true);
     const stage = useCTFStore((state) => state.stage);
+    const revealed = useCTFStore((state) => state.revealed);
+    const revealSeen = useCTFStore((state) => state.revealSeen);
+    const won = useCTFStore((state) => state.won);
+    const openReveal = useCTFStore((state) => state.openReveal);
 
     // Auto-hide logic (disabling initially but keeping the framework as requested)
     useEffect(() => {
@@ -83,6 +81,35 @@ export default function Dock() {
                         {stage >= 4 && (
                             <div className="h-full flex items-end ml-1">
                                 <DockIcon mouseX={mouseX} {...STATIC_DOCK_ITEMS.vault} />
+                            </div>
+                        )}
+
+                        {/* Stage 7 result: the reveal is a portal, so the icon calls the
+                            store instead of opening a window. Kept until the final flag
+                            so a closed overlay can always be reopened. */}
+                        {revealed && !won && (
+                            <div className="h-full flex items-end ml-1">
+                                <DockIcon
+                                    mouseX={mouseX}
+                                    id="reveal"
+                                    name="Reveal Evidence"
+                                    icon={Eye}
+                                    color="bg-emerald-800"
+                                    onActivate={openReveal}
+                                />
+                            </div>
+                        )}
+
+                        {/* Final Access: reopenable while the flag is not captured. */}
+                        {revealSeen && !won && (
+                            <div className="h-full flex items-end ml-1">
+                                <DockIcon
+                                    mouseX={mouseX}
+                                    id="final-access"
+                                    name="Final Access"
+                                    icon={KeyRound}
+                                    color="bg-red-900"
+                                />
                             </div>
                         )}
 

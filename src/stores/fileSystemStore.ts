@@ -153,7 +153,7 @@ const INITIAL_ITEMS: Record<string, FSItem> = {
         name: "instagram_account.txt",
         type: "text",
         parentId: "documents",
-        content: "Instagram Account:\nhttps://www.instagram.com/igc_officiel/\n\nNote: Monitor this account for recent activity.",
+        content: "Instagram Account:\nhttps://www.instagram.com/isitcomgoogleclub2/\n\nNote: Monitor this account for recent activity.",
         revealStage: REVEAL_STAGES.instagramAccount,
         createdAt: timestamp(),
         updatedAt: timestamp(),
@@ -174,10 +174,10 @@ const INITIAL_ITEMS: Record<string, FSItem> = {
     // ── Classified folder children ───────────────────────────────────────────
     "phone-txt": {
         id: "phone-txt",
-        name: "phone_number.txt",
+        name: "mail.txt",
         type: "text",
         parentId: "classified-folder",
-        content: "Contact Number (Operator):\n+216 XX XXX XXX\n\nNote: Call this number to obtain confidential data from the telecom operator.",
+        content: "Contact:\nstcmgglclbhr@gmail.com\n\nNote: Email this address to obtain confidential data from the telecom operator.",
         revealStage: REVEAL_STAGES.phoneNumber,
         createdAt: timestamp(),
         updatedAt: timestamp(),
@@ -213,32 +213,23 @@ const INITIAL_ITEMS: Record<string, FSItem> = {
     // ── Evidence folder children (dot-files, stage 6) ────────────────────────
     "evidence-01": {
         id: "evidence-01",
-        name: "evidence_01.jpg",
+        name: "hints.jpg",
         type: "image",
         parentId: "evidence-folder",
         hidden: true,
+        isSystem: true, // CTF evidence: cannot be renamed, moved or deleted
         revealStage: REVEAL_STAGES.evidenceFiles,
-        content: "evidence_01",
-        createdAt: timestamp(),
-        updatedAt: timestamp(),
-    },
-    "evidence-02": {
-        id: "evidence-02",
-        name: "evidence_02.jpg",
-        type: "image",
-        parentId: "evidence-folder",
-        hidden: true,
-        revealStage: REVEAL_STAGES.evidenceFiles,
-        content: "evidence_02",
+        content: "hints",
         createdAt: timestamp(),
         updatedAt: timestamp(),
     },
     "evidence-03": {
         id: "evidence-03",
-        name: "evidence_03.jpg",
+        name: "evidence_03.png",
         type: "image",
         parentId: "evidence-folder",
         hidden: true,
+        isSystem: true,
         locked: true,
         challenge: "final_photo",
         revealStage: REVEAL_STAGES.evidenceFiles,
@@ -414,7 +405,7 @@ export const useFileSystemStore = create<FileSystemState>()(
             renameItem: (id, newName) => {
                 const { items } = get();
                 const item = items[id];
-                if (!item || !newName.trim()) return;
+                if (!item || item.isSystem || !newName.trim()) return;
 
                 set({
                     items: {
@@ -431,7 +422,7 @@ export const useFileSystemStore = create<FileSystemState>()(
             updateFileContent: (id, content) => {
                 const { items } = get();
                 const item = items[id];
-                if (!item || item.type === "folder") return;
+                if (!item || item.isSystem || item.type === "folder") return;
 
                 const bytes = new Blob([content]).size;
                 set({
@@ -451,7 +442,7 @@ export const useFileSystemStore = create<FileSystemState>()(
                 const { items } = get();
                 const item = items[id];
                 const targetFolder = items[targetFolderId];
-                if (!item || !targetFolder || targetFolder.type !== "folder" || id === targetFolderId) return;
+                if (!item || item.isSystem || !targetFolder || targetFolder.type !== "folder" || id === targetFolderId) return;
 
                 set({
                     items: {
@@ -494,7 +485,9 @@ export const useFileSystemStore = create<FileSystemState>()(
         }),
         {
             name: "macos-filesystem-storage",
-            version: 3,
+            // v6: instagram_account.txt points at the current club account and
+            // phone_number.txt became mail.txt (the operator is reached by email).
+            version: 6,
             /**
              * Restore/refresh every canonical CTF item from INITIAL_ITEMS (so a
              * stage-5 file that was flagged hidden or stored under a stale version
@@ -502,9 +495,23 @@ export const useFileSystemStore = create<FileSystemState>()(
              */
             migrate: (persisted) => {
                 const previous = (persisted ?? {}) as Partial<FileSystemState>;
-                const previousItems = previous.items ?? {};
+                const migratedItems: Record<string, FSItem> = { ...(previous.items ?? {}) };
+
+                // v5: evidence_02.jpg is retired, evidence_01.jpg is now shown
+                // as hints.jpg. Do it explicitly so stale saves cannot resurrect
+                // the old entry or keep the old display name.
+                delete migratedItems["evidence-02"];
+                const staleHints = migratedItems["evidence-01"];
+                if (staleHints) {
+                    migratedItems["evidence-01"] = {
+                        ...staleHints,
+                        ...INITIAL_ITEMS["evidence-01"],
+                        createdAt: staleHints.createdAt,
+                    };
+                }
+
                 const userItems = Object.fromEntries(
-                    Object.entries(previousItems).filter(([id]) => isUserItem(id))
+                    Object.entries(migratedItems).filter(([id]) => isUserItem(id))
                 );
 
                 return {

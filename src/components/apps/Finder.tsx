@@ -392,7 +392,7 @@ export default function Finder() {
                             <button
                                 onClick={() =>
                                     selectedItemIds
-                                        .filter((id) => items[id] && isVisible(items[id], { stage, showHidden }))
+                                        .filter((id) => items[id] && !items[id].isSystem && isVisible(items[id], { stage, showHidden }))
                                         .forEach((id) => deleteItem(id))
                                 }
                                 className="flex items-center gap-1 px-2 py-1 hover:bg-red-500 hover:text-white rounded text-xs font-medium text-red-600 dark:text-red-400 transition"
@@ -594,7 +594,7 @@ export default function Finder() {
                                             )}
                                         </div>
 
-                                        {renamingId === item.id ? (
+                                        {renamingId === item.id && !item.isSystem ? (
                                             <input
                                                 type="text"
                                                 autoFocus
@@ -655,7 +655,7 @@ export default function Finder() {
                                                     {getItemIcon(item.type, 18)}
                                                     {item.hidden && <EyeOff size={12} className="text-gray-400" />}
                                                     {locked && <Lock size={12} className="text-amber-500" />}
-                                                    {renamingId === item.id ? (
+                                                    {renamingId === item.id && !item.isSystem ? (
                                                         <input
                                                             type="text"
                                                             autoFocus
@@ -702,12 +702,14 @@ export default function Finder() {
                             >
                                 <Eye size={14} /> Open / Edit
                             </button>
-                            <button
-                                onClick={() => startRename(contextMenu.item!)}
-                                className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-blue-500 hover:text-white transition-colors"
-                            >
-                                <Edit3 size={14} /> Rename
-                            </button>
+                            {!contextMenu.item.isSystem && (
+                                <button
+                                    onClick={() => startRename(contextMenu.item!)}
+                                    className="w-full px-3 py-1.5 flex items-center gap-2 hover:bg-blue-500 hover:text-white transition-colors"
+                                >
+                                    <Edit3 size={14} /> Rename
+                                </button>
+                            )}
                             {contextMenu.item.type !== "folder" && !contextMenu.item.locked && (
                                 <button
                                     onClick={() => {
@@ -719,16 +721,20 @@ export default function Finder() {
                                     <Download size={14} /> Download File
                                 </button>
                             )}
-                            <div className="my-1 border-t border-gray-200 dark:border-zinc-700" />
-                            <button
-                                onClick={() => {
-                                    deleteItem(contextMenu.item!.id);
-                                    setContextMenu(null);
-                                }}
-                                className="w-full px-3 py-1.5 flex items-center gap-2 text-red-500 hover:bg-red-500 hover:text-white transition-colors"
-                            >
-                                <Trash2 size={14} /> Delete / Trash
-                            </button>
+                            {!contextMenu.item.isSystem && (
+                                <>
+                                    <div className="my-1 border-t border-gray-200 dark:border-zinc-700" />
+                                    <button
+                                        onClick={() => {
+                                            deleteItem(contextMenu.item!.id);
+                                            setContextMenu(null);
+                                        }}
+                                        className="w-full px-3 py-1.5 flex items-center gap-2 text-red-500 hover:bg-red-500 hover:text-white transition-colors"
+                                    >
+                                        <Trash2 size={14} /> Delete / Trash
+                                    </button>
+                                </>
+                            )}
                         </>
                     ) : (
                         <>

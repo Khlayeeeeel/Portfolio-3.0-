@@ -23,7 +23,7 @@ export const REVEAL_STAGES = {
 } as const;
 
 export const FINAL_PHOTO_CLUE =
-  "One person keeps the technical side of IGC running. He knows the system better than anyone. What is the name of the technical assistant?";
+  "The first frame shows the technical department. Compare it with the degraded portrait and enter the name of the person in it.";
 
 export const VAULT_CLUES = {
   date: "The day I decided to attack the IGC system was a special day for Tunisians... Eid Jala2.",

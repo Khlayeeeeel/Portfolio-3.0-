@@ -9,13 +9,12 @@ import { FINAL_PHOTO_CLUE } from "@/lib/ctf-content";
 import { applyChallengeSuccess } from "@/lib/ctf-actions";
 import { redeemUnlockProof } from "@/lib/ctf-client";
 import { getCachedImage } from "@/lib/evidence-cache";
-import { loadEvidenceImage, saveEvidenceImage } from "@/lib/evidence-store";
+import { loadEvidenceImage } from "@/lib/evidence-store";
 import PasswordModal from "@/components/ctf/PasswordModal";
 
 const EVIDENCE = [
-    { id: 1, name: "evidence_01.jpg", caption: "Recovered from .evidence — heavily degraded." },
-    { id: 2, name: "evidence_02.jpg", caption: "Recovered from .evidence — partially degraded." },
-    { id: 3, name: "evidence_03.jpg", caption: "Sealed. Requires the final identification." },
+    { id: 1, name: "hints.jpg", caption: "The hacker is in IGC, Tech Dep." },
+    { id: 3, name: "evidence_03.png", caption: "Sealed. Name the member to reveal the clean frame." },
 ] as const;
 
 const blobToDataUrl = (blob: Blob) =>
@@ -33,9 +32,14 @@ export default function Photos() {
     const evidenceToken = useCTFStore((s) => s.evidenceToken);
     const galleryToken = useCTFStore((s) => s.galleryToken);
     const evidence3Proof = useCTFStore((s) => s.evidence3Proof);
+    const galleryProof = useCTFStore((s) => s.galleryProof);
     const evidenceImages = useCTFStore((s) => s.evidenceImages);
     const setEvidenceImage = useCTFStore((s) => s.setEvidenceImage);
     const setEvidence3Proof = useCTFStore((s) => s.setEvidence3Proof);
+    const setEvidenceToken = useCTFStore((s) => s.setEvidenceToken);
+    const setGalleryToken = useCTFStore((s) => s.setGalleryToken);
+    const revealOpen = useCTFStore((s) => s.revealOpen);
+    const openReveal = useCTFStore((s) => s.openReveal);
 
     const items = useFileSystemStore((s) => s.items);
 
@@ -49,41 +53,49 @@ export default function Photos() {
 
     const fetchImage = useCallback(
         async (id: number, tokenOverride?: string) => {
+            const scope = id === 3 ? "3" : "gallery";
+            const proof = id === 3 ? evidence3Proof : galleryProof;
             let token = tokenOverride ?? (id === 3 ? evidenceToken : galleryToken);
-            if (!token) {
-                setError("Evidence token expired. Re-open the vault to get a new one.");
-                return;
-            }
 
             try {
                 const urlFor = (value: string) =>
                     `/api/ctf/evidence/${id}?token=${encodeURIComponent(value)}`;
-                let res = await fetch(urlFor(token));
+                let res = token ? await fetch(urlFor(token)) : null;
 
                 // A refresh can consume the original token before a large image is
-                // cached. Exchange the server-signed proof for a fresh token once.
-                if (!res.ok && id === 3 && evidence3Proof) {
-                    const redeemed = await redeemUnlockProof(evidence3Proof);
+                // cached. Re-mint one from the server-signed proof for this scope.
+                if ((!res || !res.ok) && proof) {
+                    const redeemed = await redeemUnlockProof(proof, scope);
                     if (redeemed.ok && redeemed.token) {
                         token = redeemed.token;
+                        if (id === 3) setEvidenceToken(token);
+                        else setGalleryToken(token);
                         res = await fetch(urlFor(token));
                     }
                 }
 
-                if (!res.ok) {
-                    setError("Evidence token expired or already used.");
+                if (!res?.ok) {
+                    setError("Evidence token expired. Re-solve the challenge to obtain a new one.");
                     return;
                 }
 
-                const dataUrl = await blobToDataUrl(await res.blob());
-                setEvidenceImage(String(id), dataUrl);
-                void saveEvidenceImage(id, dataUrl);
+                // setEvidenceImage caches in memory, localStorage (small files)
+                // and IndexedDB (large files) — one single write path.
+                setEvidenceImage(String(id), await blobToDataUrl(await res.blob()));
                 setError("");
             } catch {
                 setError("Network error while fetching the evidence.");
             }
         },
-        [evidenceToken, galleryToken, evidence3Proof, setEvidenceImage]
+        [
+            evidenceToken,
+            galleryToken,
+            evidence3Proof,
+            galleryProof,
+            setEvidenceImage,
+            setEvidenceToken,
+            setGalleryToken,
+        ]
     );
 
     // Restore any image that only ever lived in IndexedDB (large files).
@@ -91,7 +103,7 @@ export default function Photos() {
         if (stage < 6) return;
         let cancelled = false;
         (async () => {
-            for (const id of [1, 2, 3]) {
+            for (const id of [1, 3]) {
                 if (imageFor(id)) continue;
                 const stored = await loadEvidenceImage(id);
                 if (!cancelled && stored) setEvidenceImage(String(id), stored);
@@ -108,24 +120,26 @@ export default function Photos() {
     useEffect(() => {
         if (!hydrated) return;
         if (!evidence3Unlocked && !completed) return;
-        if (imageFor(3) || restoringFinal.current) return;
+        // While the reveal overlay is open it owns the single-use token.
+        if (revealOpen || imageFor(3) || restoringFinal.current) return;
         restoringFinal.current = true;
         void fetchImage(3).finally(() => {
             restoringFinal.current = false;
         });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [hydrated, evidence3Unlocked, completed, finalImage, evidence3Proof, fetchImage]);
+    }, [hydrated, evidence3Unlocked, completed, finalImage, evidence3Proof, fetchImage, revealOpen]);
 
-    // Stage 6: the two recovered frames are pulled once through their token,
-    // but only after cached images had a chance to load (token may be burned).
+    // Stage 6: the recovered hint frame is pulled once through its token, but
+    // only after cached images had a chance to load (token may be burned).
     useEffect(() => {
         if (!hydrated || stage < 6) return;
-        if (!galleryToken) return;
-        if (imageFor(1) && imageFor(2)) return;
+        // The proof alone is enough: fetchImage mints a fresh token when the
+        // original one was already consumed by a prefetch before F5.
+        if (!galleryToken && !galleryProof) return;
+        if (imageFor(1)) return;
         void fetchImage(1);
-        void fetchImage(2);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [hydrated, stage, galleryToken]);
+    }, [hydrated, stage, galleryToken, galleryProof]);
 
     if (stage < 6) {
         return (
@@ -162,7 +176,7 @@ export default function Photos() {
                     Albums
                 </div>
                 <div className="space-y-1">
-                    {[["Recovered", 2], [".evidence", 3]].map(([label, count]) => (
+                    {[["Recovered", 1], [".evidence", 2]].map(([label, count]) => (
                         <div
                             key={String(label)}
                             className="flex cursor-default items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-black/10 dark:hover:bg-white/10"
@@ -222,7 +236,7 @@ export default function Photos() {
                         </motion.div>
                     )}
 
-                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+                    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                         {EVIDENCE.map((photo) => {
                             const isFinal = photo.id === 3;
                             const unlocked = !isFinal || evidence3Unlocked;
@@ -232,12 +246,19 @@ export default function Photos() {
                                 <div key={photo.id} className="flex flex-col gap-2">
                                     <div className="relative aspect-[4/3] overflow-hidden rounded-lg border border-gray-200 bg-zinc-800 shadow-sm dark:border-white/10">
                                         {unlocked && dataUrl ? (
-                                            /* eslint-disable-next-line @next/next/no-img-element */
-                                            <img
-                                                src={dataUrl}
-                                                alt={photo.name}
-                                                className="h-full w-full object-cover"
-                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => isFinal && openReveal()}
+                                                title={isFinal ? "Reopen the reveal" : undefined}
+                                                className={`h-full w-full ${isFinal ? "cursor-pointer" : "cursor-default"}`}
+                                            >
+                                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                <img
+                                                    src={dataUrl}
+                                                    alt={photo.name}
+                                                    className="h-full w-full object-cover"
+                                                />
+                                            </button>
                                         ) : unlocked ? (
                                             <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
                                                 <span className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white/80" />
@@ -292,7 +313,7 @@ export default function Photos() {
 
                     {!evidence3Unlocked && (
                         <p className="mt-8 font-mono text-[11px] leading-relaxed text-gray-500 dark:text-zinc-500">
-                            The last frame is sealed with the identity of the insider. Everything you found
+                            The last frame is sealed with the identity of the hacker. Everything you found
                             so far is a step towards that name.
                         </p>
                     )}
@@ -303,17 +324,16 @@ export default function Photos() {
                 <PasswordModal
                     isOpen
                     challenge="final_photo"
-                    fileName="evidence_03.jpg"
+                    fileName="evidence_03.png"
                     clue={FINAL_PHOTO_CLUE}
                     onSuccess={(data) => {
                         const item = items["evidence-03"];
                         if (item) applyChallengeSuccess(item, data);
                         if (data.proof) setEvidence3Proof(data.proof);
                         setUnlocking(false);
-                        restoringFinal.current = true;
-                        void fetchImage(3, data.token).finally(() => {
-                            restoringFinal.current = false;
-                        });
+                        // The reveal screen downloads and persists the frame before
+                        // showing it; fetching here as well would spend the
+                        // single-use token twice and one caller would get a 403.
                     }}
                     onClose={() => setUnlocking(false)}
                 />

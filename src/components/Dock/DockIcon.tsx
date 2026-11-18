@@ -12,6 +12,8 @@ interface DockIconProps {
     img?: string;
     color?: string;
     pulse?: boolean;
+    /** Overrides "open a window" (the reveal overlay is a portal, not a window). */
+    onActivate?: () => void;
     mouseX: MotionValue<number>;
 }
 
@@ -22,6 +24,7 @@ export default function DockIcon({
     img,
     color,
     pulse,
+    onActivate,
     mouseX
 }: DockIconProps) {
     const ref = useRef<HTMLButtonElement>(null);
@@ -37,7 +40,8 @@ export default function DockIcon({
 
     const handleClick = () => {
         // Open first: the window must never wait for a cosmetic animation.
-        openWindow(id, name, id); // Fallback icon ID
+        if (onActivate) onActivate();
+        else openWindow(id, name, id); // Fallback icon ID
         setIsBouncing(true);
         controls
             .start({

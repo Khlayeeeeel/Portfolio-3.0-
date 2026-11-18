@@ -14,6 +14,9 @@ import Settings from "@/components/apps/Settings";
 import Arcade from "@/components/apps/Arcade";
 import PasswordVault from "@/components/ctf/PasswordVault";
 import PasswordModal from "@/components/ctf/PasswordModal";
+import FinalAccess from "@/components/ctf/FinalAccess";
+import VictoryScreen from "@/components/ctf/VictoryScreen";
+import RevealScreen from "@/components/ctf/RevealScreen";
 import HackerPopup, { HackerPopupContent } from "@/components/ctf/HackerPopup";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useWindowStore } from "@/stores/windowStore";
@@ -59,11 +62,29 @@ export default function Desktop() {
 
     const { windows, openWindow } = useWindowStore();
     const { items, setCurrentFolder } = useFileSystemStore();
-    const { stage, showHidden, shownPopups, unlockedFiles, markPopupShown } = useCTFStore();
+    const {
+        stage,
+        showHidden,
+        shownPopups,
+        unlockedFiles,
+        revealed,
+        revealSeen,
+        won,
+        markPopupShown,
+    } = useCTFStore();
 
     useEffect(() => {
         setMounted(true);
     }, []);
+
+    // Stage 7: the staged photograph is available — open the president's final
+    // access window automatically. It is a normal window, so Photos (and its
+    // Download button) stays usable behind it.
+    useEffect(() => {
+        if (mounted && revealed && revealSeen && !won) {
+            openWindow("final-access", "Final Access", "lock");
+        }
+    }, [mounted, revealed, revealSeen, won, openWindow]);
 
     // Only icons the player is allowed to see at this stage. The classified
     // file is a real VFS item in Documents, also shown here as a shortcut so
@@ -170,7 +191,8 @@ export default function Desktop() {
                                 {win.id === "preferences" && <Settings />}
                                 {win.id === "arcade" && <Arcade />}
                                 {win.id === "vault" && <PasswordVault />}
-                                {!["terminal", "finder", "safari", "notes", "photos", "preferences", "arcade", "vault"].includes(win.id) && (
+                                {win.id === "final-access" && <FinalAccess />}
+                                {!["terminal", "finder", "safari", "notes", "photos", "preferences", "arcade", "vault", "final-access"].includes(win.id) && (
                                     <div className="p-10 flex items-center justify-center h-full text-gray-400">
                                         {win.title} is coming soon...
                                     </div>
@@ -214,6 +236,13 @@ export default function Desktop() {
                     />
                 )}
             </AnimatePresence>
+
+            {/* Stage 8 victory — kept outside draggable windows so it really
+                covers the viewport. Dismissable; the photo stays behind it. */}
+            {/* Stage 7 result: the sharp frame, portalled out of any window. */}
+            <RevealScreen />
+
+            {mounted && won && <VictoryScreen />}
         </div>
     );
 }

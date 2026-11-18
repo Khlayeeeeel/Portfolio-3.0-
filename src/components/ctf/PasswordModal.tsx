@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { verifyChallenge, type VerifyResult } from "@/lib/ctf-client";
 
 interface PasswordModalProps {
@@ -25,8 +26,13 @@ export default function PasswordModal({
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(false);
     const [shake, setShake] = useState(false);
+    const [mounted, setMounted] = useState(false);
 
-    if (!isOpen) return null;
+    useEffect(() => setMounted(true), []);
+
+    // A fixed overlay rendered inside a react-rnd window is trapped by its
+    // transform. Portal it to <body> so it really covers the viewport.
+    if (!isOpen || !mounted) return null;
 
     const fail = (message: string) => {
         setError(message);
@@ -58,7 +64,7 @@ export default function PasswordModal({
         }
     };
 
-    return (
+    return createPortal(
         <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/70 p-4">
             <div
                 className={`w-full max-w-sm rounded-lg border border-green-500/40 bg-zinc-900 p-6 font-mono shadow-2xl transition-transform ${
@@ -104,6 +110,7 @@ export default function PasswordModal({
                     </div>
                 </form>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 }

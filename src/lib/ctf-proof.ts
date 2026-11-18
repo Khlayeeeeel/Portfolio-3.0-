@@ -7,6 +7,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 
 const SCOPE = "3";
+/** Opaque scopes issued by the server; never derived from client input. */
+export type ProofScope = "3" | "gallery";
+const VALID_SCOPES: readonly ProofScope[] = ["3", "gallery"];
 export const PROOF_TTL_MS = 24 * 60 * 60_000;
 
 // A dedicated secret is recommended. Falling back to the server-only challenge
@@ -20,15 +23,15 @@ function sign(payload: string): string {
     return createHmac("sha256", SECRET).update(payload).digest("base64url");
 }
 
-/** Issues a proof scoped to an evidence id (default: evidence_03). */
-export function issueUnlockProof(scope: string = SCOPE): string {
+/** Issues a proof for an allowlisted evidence scope (default: evidence_03). */
+export function issueUnlockProof(scope: ProofScope = SCOPE): string {
     const payload = `v1.${scope}.${Date.now() + PROOF_TTL_MS}.${randomBytes(12).toString("base64url")}`;
     return `${payload}.${sign(payload)}`;
 }
 
 /** Verifies signature, scope and expiry. Never trusts client-supplied scope. */
-export function verifyUnlockProof(proof: unknown, scope: string = SCOPE): boolean {
-    if (typeof proof !== "string") return false;
+export function verifyUnlockProof(proof: unknown, scope: ProofScope = SCOPE): boolean {
+    if (typeof proof !== "string" || !VALID_SCOPES.includes(scope)) return false;
     const parts = proof.split(".");
     if (parts.length !== 5) return false;
     const [version, proofScope, rawExpiry, nonce, signature] = parts;

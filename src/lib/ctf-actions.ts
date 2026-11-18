@@ -7,9 +7,25 @@ import { LAST_ACTIVITY_LOG_CONTENT, REVEAL_STAGES } from "@/lib/ctf-content";
 export interface VerifyResult {
   ok: boolean;
   token?: string;
+  /** Server-signed proof from final_photo; redeemable for a fresh token. */
+  proof?: string;
   field?: string;
   error?: string;
 }
+
+/**
+ * The final flag has no VFS file of its own; this descriptor just routes it
+ * through the same success path as the other challenges.
+ */
+export const FINAL_FLAG_ITEM: FSItem = {
+  id: "final-flag",
+  name: "Final Access",
+  type: "text",
+  parentId: null,
+  challenge: "final_flag",
+  createdAt: "",
+  updatedAt: "",
+};
 
 /**
  * Single place where a solved challenge updates the run. Every surface that can
@@ -18,6 +34,14 @@ export interface VerifyResult {
  */
 export function applyChallengeSuccess(item: FSItem, data?: VerifyResult): void {
   const ctf = useCTFStore.getState();
+
+  // Stage 8 is not a file unlock: it only flips the terminal win state.
+  if (item.challenge === "final_flag") {
+    ctf.advanceStage(8);
+    ctf.setWon();
+    return;
+  }
+
   ctf.unlockFile(item.id);
 
   switch (item.challenge) {
@@ -32,10 +56,16 @@ export function applyChallengeSuccess(item: FSItem, data?: VerifyResult): void {
       break;
 
     case "final_photo":
+      // The token downloads the sharp frame exactly once; the proof lets the
+      // client mint a replacement after a refresh consumed it.
       if (data?.token) ctf.setEvidenceToken(data.token);
+      if (data?.proof) ctf.setEvidence3Proof(data.proof);
       ctf.setEvidence3Unlocked();
       ctf.setCompleted();
       ctf.advanceStage(7);
+      // Stage 7 == `revealed`: the reveal screen opens from this single point,
+      // whichever surface (Photos, Finder, Terminal, Desktop icon) solved it.
+      ctf.setRevealed();
       break;
 
     default:
