@@ -2,18 +2,9 @@
 
 import { motion, useMotionValue, Reorder, AnimatePresence } from "framer-motion";
 import { useEffect, useState } from "react";
-import {
-    Folder,
-    Terminal,
-    Globe,
-    FileText,
-    Camera,
-    Gamepad2,
-    Settings,
-    Trash2
-} from "lucide-react";
-import safariIcon from "@/assets/icons/safari.png";
+import { Camera, Eye, Folder, KeyRound, Lock, Terminal, Trash2 } from "lucide-react";
 import { useDockState } from "./useDockState";
+import { useCTFStore } from "@/stores/ctfStore";
 import DockIcon from "./DockIcon";
 import DockSeparator from "./DockSeparator";
 import styles from "./dock.module.css";
@@ -21,18 +12,20 @@ import { cn } from "@/lib/utils";
 
 const STATIC_DOCK_ITEMS = {
     finder: { id: "finder", icon: Folder, name: "Finder", color: "bg-blue-500" },
-    safari: { id: "safari", img: safariIcon.src, name: "Safari", color: "bg-transparent hover:bg-white/10" },
     terminal: { id: "terminal", icon: Terminal, name: "Terminal", color: "bg-gray-800" },
-    notes: { id: "notes", icon: FileText, name: "Notes", color: "bg-yellow-400" },
     photos: { id: "photos", icon: Camera, name: "Photos", color: "bg-pink-500" },
-    preferences: { id: "preferences", icon: Settings, name: "System Settings", color: "bg-gray-400" },
-    arcade: { id: "arcade", icon: Gamepad2, name: "Arcade", color: "bg-purple-500", pulse: true },
+    vault: { id: "vault", icon: Lock, name: "Password Vault", color: "bg-red-900" },
 };
 
 export default function Dock() {
     const mouseX = useMotionValue(Infinity);
     const { dockItemIds, reorderDockItems } = useDockState();
     const [isVisible, setIsVisible] = useState(true);
+    const stage = useCTFStore((state) => state.stage);
+    const revealed = useCTFStore((state) => state.revealed);
+    const revealSeen = useCTFStore((state) => state.revealSeen);
+    const won = useCTFStore((state) => state.won);
+    const openReveal = useCTFStore((state) => state.openReveal);
 
     // Auto-hide logic (disabling initially but keeping the framework as requested)
     useEffect(() => {
@@ -61,7 +54,9 @@ export default function Dock() {
             <AnimatePresence>
                 {isVisible && (
                     <motion.div
-                        initial={{ y: 100, opacity: 0 }}
+                        // No entrance animation: the dock is critical UI and must never
+                        // stay at an intermediate animation state.
+                        initial={false}
                         animate={{ y: 0, opacity: 1 }}
                         exit={{ y: 100, opacity: 0 }}
                         transition={{ type: "spring", stiffness: 300, damping: 25 }}
@@ -81,6 +76,42 @@ export default function Dock() {
                                 </Reorder.Item>
                             ))}
                         </Reorder.Group>
+
+                        {/* The vault only appears once the operator data is open. */}
+                        {stage >= 4 && (
+                            <div className="h-full flex items-end ml-1">
+                                <DockIcon mouseX={mouseX} {...STATIC_DOCK_ITEMS.vault} />
+                            </div>
+                        )}
+
+                        {/* Stage 7 result: the reveal is a portal, so the icon calls the
+                            store instead of opening a window. Kept until the final flag
+                            so a closed overlay can always be reopened. */}
+                        {revealed && !won && (
+                            <div className="h-full flex items-end ml-1">
+                                <DockIcon
+                                    mouseX={mouseX}
+                                    id="reveal"
+                                    name="Reveal Evidence"
+                                    icon={Eye}
+                                    color="bg-emerald-800"
+                                    onActivate={openReveal}
+                                />
+                            </div>
+                        )}
+
+                        {/* Final Access: reopenable while the flag is not captured. */}
+                        {revealSeen && !won && (
+                            <div className="h-full flex items-end ml-1">
+                                <DockIcon
+                                    mouseX={mouseX}
+                                    id="final-access"
+                                    name="Final Access"
+                                    icon={KeyRound}
+                                    color="bg-red-900"
+                                />
+                            </div>
+                        )}
 
                         <DockSeparator />
 

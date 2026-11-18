@@ -12,6 +12,8 @@ interface DockIconProps {
     img?: string;
     color?: string;
     pulse?: boolean;
+    /** Overrides "open a window" (the reveal overlay is a portal, not a window). */
+    onActivate?: () => void;
     mouseX: MotionValue<number>;
 }
 
@@ -22,6 +24,7 @@ export default function DockIcon({
     img,
     color,
     pulse,
+    onActivate,
     mouseX
 }: DockIconProps) {
     const ref = useRef<HTMLButtonElement>(null);
@@ -35,20 +38,23 @@ export default function DockIcon({
     const { openWindow, windows } = useWindowStore();
     const isRunning = windows.some((w) => w.id === id && w.isOpen);
 
-    const handleClick = async () => {
+    const handleClick = () => {
+        // Open first: the window must never wait for a cosmetic animation.
+        if (onActivate) onActivate();
+        else openWindow(id, name, id); // Fallback icon ID
         setIsBouncing(true);
-        await controls.start({
-            y: [0, -24, 0],
-            transition: { duration: 0.6, ease: "easeInOut" }
-        });
-        setIsBouncing(false);
-        openWindow(id, name, id); // Fallback icon ID
+        controls
+            .start({
+                y: [0, -24, 0],
+                transition: { duration: 0.6, ease: "easeInOut" },
+            })
+            .catch(() => undefined)
+            .finally(() => setIsBouncing(false));
     };
 
     const onRightClick = (e: React.MouseEvent) => {
         e.preventDefault();
         // Context menu placeholder for future expansion
-        console.log(`Right clicked ${name}`);
     };
 
     const indicatorVariants = {

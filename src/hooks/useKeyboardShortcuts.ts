@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useWindowStore } from "@/stores/windowStore";
+import { useCTFStore } from "@/stores/ctfStore";
 
 export function useKeyboardShortcuts() {
     const { focusedWindowId, closeWindow, minimizeWindow } = useWindowStore();
@@ -10,13 +11,19 @@ export function useKeyboardShortcuts() {
         const handleKeyDown = (e: KeyboardEvent) => {
             const isCmd = e.metaKey || e.ctrlKey;
 
-            // ⌘ + Space: Spotlight (Placeholder)
-            if (isCmd && e.code === "Space") {
+            // Cmd/Ctrl + Shift + . : show or hide dot-files
+            if (isCmd && e.shiftKey && (e.code === "Period" || e.key === ">")) {
                 e.preventDefault();
-                console.log("Spotlight triggered");
+                useCTFStore.getState().toggleHidden();
+                return;
             }
 
-            // ⌘ + W: Close focused window
+            // Cmd + Space: Spotlight (Placeholder)
+            if (isCmd && e.code === "Space") {
+                e.preventDefault();
+            }
+
+            // Cmd + W: Close focused window
             if (isCmd && e.key === "w") {
                 e.preventDefault();
                 if (focusedWindowId) {
@@ -24,7 +31,7 @@ export function useKeyboardShortcuts() {
                 }
             }
 
-            // ⌘ + M: Minimize focused window
+            // Cmd + M: Minimize focused window
             if (isCmd && e.key === "m") {
                 e.preventDefault();
                 if (focusedWindowId) {

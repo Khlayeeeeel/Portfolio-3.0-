@@ -4,25 +4,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useState, useEffect } from "react";
 import { LucideApple, ArrowRight, Lock } from "lucide-react";
 import lockBg from "@/assets/lock_bg.jpg";
-import ownerImg from "@/assets/owner.png";
+import { verifyChallenge } from "@/lib/ctf-client";
+import { startSession } from "@/lib/session";
+import { useCTFStore } from "@/stores/ctfStore";
 
 interface BootSequenceProps {
     onComplete: () => void;
-}
-
-// Obfuscated cryptographic hash of the password (SHA-256)
-// Prevents plaintext password exposure when inspecting client JavaScript code
-const VERIFY_HASH = "8d21cc2b84ee17ce05c403a1a95bd2905aec4e476fba6cdfbeb9eb5d02a76d8e";
-
-async function computeSha256(input: string): Promise<string> {
-    if (typeof window !== "undefined" && window.crypto?.subtle) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(input);
-        const hashBuffer = await window.crypto.subtle.digest("SHA-256", data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-    }
-    return "";
 }
 
 export default function BootSequence({ onComplete }: BootSequenceProps) {
@@ -32,6 +19,8 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
     const [isError, setIsError] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState("");
+
+    const advanceStage = useCTFStore((state) => state.advanceStage);
 
     useEffect(() => {
         if (stage === "apple") {
@@ -49,6 +38,13 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         }
     }, [stage]);
 
+    const triggerLoginError = (message: string) => {
+        setIsError(true);
+        setErrorMessage(message);
+        setPasswordInput("");
+        setTimeout(() => setIsError(false), 800);
+    };
+
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!passwordInput || isLoading) return;
@@ -58,52 +54,35 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
         setErrorMessage("");
 
         try {
-            // First: Attempt Server-Side Verification via Next.js API Route
-            const response = await fetch("/api/auth/login", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ password: passwordInput }),
+            // The answer never leaves the server: only the boolean comes back.
+            const data = await verifyChallenge({
+                challenge: "login",
+                answer: passwordInput,
             });
 
-            if (response.ok) {
-                const data = await response.json();
-                if (data.success) {
-                    onComplete();
-                    return;
-                }
-            }
-
-            // Second: Client-Side Cryptographic Hash Fallback Verification
-            const clientHash = await computeSha256(passwordInput);
-            if (clientHash === VERIFY_HASH) {
+            if (data.ok) {
+                startSession();
+                advanceStage(2);
                 onComplete();
                 return;
             }
 
-            // Failed verification
-            triggerLoginError();
+            triggerLoginError(
+                data.rateLimited
+                    ? "Too many attempts. Wait a minute."
+                    : data.error === "Server misconfiguration."
+                      ? "System unavailable. Contact the organiser."
+                      : "Incorrect Password"
+            );
         } catch {
-            // If offline/network failure, verify using client SHA-256 hash
-            const clientHash = await computeSha256(passwordInput);
-            if (clientHash === VERIFY_HASH) {
-                onComplete();
-            } else {
-                triggerLoginError();
-            }
+            triggerLoginError("Network error. Try again.");
         } finally {
             setIsLoading(false);
         }
     };
 
-    const triggerLoginError = () => {
-        setIsError(true);
-        setErrorMessage("Incorrect Password");
-        setPasswordInput("");
-        setTimeout(() => setIsError(false), 800);
-    };
-
     return (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black overflow-hidden font-sans">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center overflow-hidden bg-black font-sans">
             <AnimatePresence mode="wait">
                 {stage === "apple" ? (
                     <motion.div
@@ -140,37 +119,34 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                             backgroundPosition: "center",
                         }}
                     >
-                        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+                        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
 
                         <motion.div
                             initial={{ y: 20, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
                             transition={{ delay: 0.3, duration: 0.8 }}
-                            className="relative z-10 flex flex-col items-center"
+                            className="relative z-10 flex flex-col items-center px-6 text-center"
                         >
-                            {/* User Avatar */}
-                            <div className="w-24 h-24 rounded-full bg-white/20 border border-white/30 p-1 mb-4 shadow-2xl">
-                                <img
-                                    src={ownerImg.src}
-                                    alt="Owner"
-                                    className="w-full h-full rounded-full object-cover shadow-inner"
-                                />
-                            </div>
-                            <h2 className="text-white text-xl font-semibold mb-6 drop-shadow-lg tracking-wide">
-                                Mohamed Khalil Ayadhi
-                            </h2>
+                            <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.45em] text-red-400/80">
+                                IGC
+                            </p>
+                            <h1 className="mb-3 font-mono text-2xl font-bold tracking-[0.2em] text-white drop-shadow-lg">
+                                IGC INTERNAL SYSTEM
+                            </h1>
+                            <p className="mb-8 max-w-md font-mono text-xs leading-relaxed text-white/60">
+                                Unauthorized access prohibited. Enter system password:
+                            </p>
 
-                            {/* Password Form with Shake Error Animation */}
                             <motion.form
                                 onSubmit={handleLogin}
                                 animate={isError ? { x: [-10, 10, -10, 10, -5, 5, 0] } : {}}
                                 transition={{ duration: 0.5 }}
-                                className="flex flex-col items-center relative"
+                                className="relative flex flex-col items-center"
                             >
                                 <div className="relative flex items-center">
                                     <input
                                         type="password"
-                                        placeholder="Enter Password"
+                                        placeholder="System password"
                                         value={passwordInput}
                                         onChange={(e) => {
                                             setPasswordInput(e.target.value);
@@ -178,34 +154,34 @@ export default function BootSequence({ onComplete }: BootSequenceProps) {
                                         }}
                                         autoFocus
                                         disabled={isLoading}
-                                        className={`w-52 bg-white/20 backdrop-blur-xl border ${
+                                        className={`w-64 rounded-full border bg-white/10 px-4 py-2 pr-9 text-center font-mono text-sm text-white backdrop-blur-xl placeholder-white/40 transition-all focus:outline-none focus:ring-2 ${
                                             isError
                                                 ? "border-red-400 focus:ring-red-400"
-                                                : "border-white/30 focus:ring-white/50"
-                                        } rounded-full px-4 py-2 pr-9 text-white placeholder-white/60 text-sm text-center focus:outline-none focus:ring-2 transition-all shadow-lg`}
+                                                : "border-white/25 focus:ring-white/40"
+                                        }`}
                                     />
                                     <button
                                         type="submit"
                                         disabled={!passwordInput || isLoading}
-                                        className="absolute right-1.5 p-1 rounded-full bg-white/30 hover:bg-white/50 disabled:opacity-30 text-white transition-all"
+                                        className="absolute right-1.5 rounded-full bg-white/20 p-1 text-white transition-all hover:bg-white/40 disabled:opacity-30"
+                                        aria-label="Unlock"
                                     >
                                         <ArrowRight size={14} />
                                     </button>
                                 </div>
 
                                 {errorMessage ? (
-                                    <p className="mt-2 text-xs text-red-300 font-medium drop-shadow animate-fade-in">
+                                    <p className="mt-2 animate-fade-in font-mono text-xs font-medium text-red-300 drop-shadow">
                                         {errorMessage}
                                     </p>
                                 ) : (
-                                    <p className="mt-3 text-white/60 text-xs flex items-center gap-1">
+                                    <p className="mt-3 flex items-center gap-1 font-mono text-[11px] text-white/50">
                                         <Lock size={12} /> Press Enter to Unlock
                                     </p>
                                 )}
                             </motion.form>
                         </motion.div>
 
-                        {/* Top Time Display */}
                         <div className="absolute top-12 flex flex-col items-center text-white">
                             <DateTimeDisplay />
                         </div>

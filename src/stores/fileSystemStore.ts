@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { LAST_ACTIVITY_LOG_CONTENT, REVEAL_STAGES } from "@/lib/ctf-content";
 
 export type FSItemType = "folder" | "text" | "pdf" | "image" | "code" | "archive" | "file";
 
@@ -13,6 +14,10 @@ export interface FSItem {
     createdAt: string;
     updatedAt: string;
     isSystem?: boolean; // System folders shouldn't be deleted accidentally
+    locked?: boolean;   // file requires password to open
+    challenge?: string; // which CTF challenge unlocks this file
+    hidden?: boolean;   // dot-file: only listed with the hidden-files toggle
+    revealStage?: number; // first CTF stage at which the item exists for the player
 }
 
 interface FileSystemState {
@@ -42,133 +47,195 @@ interface FileSystemState {
     resetToDefault: () => void;
 }
 
+const timestamp = () => new Date().toISOString();
+
 const INITIAL_ITEMS: Record<string, FSItem> = {
+    // ── System folders ──────────────────────────────────────────────────────
     root: {
         id: "root",
         name: "Macintosh HD",
         type: "folder",
         parentId: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
         isSystem: true,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
+    },
+    home: {
+        id: "home",
+        name: "home",
+        type: "folder",
+        parentId: "root",
+        isSystem: true,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
+    },
+    igc: {
+        id: "igc",
+        name: "igc",
+        type: "folder",
+        parentId: "home",
+        isSystem: true,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
     },
     desktop: {
         id: "desktop",
         name: "Desktop",
         type: "folder",
-        parentId: "root",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        parentId: "igc",
         isSystem: true,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
     },
     documents: {
         id: "documents",
         name: "Documents",
         type: "folder",
-        parentId: "root",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        parentId: "igc",
         isSystem: true,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
     },
     downloads: {
         id: "downloads",
         name: "Downloads",
         type: "folder",
-        parentId: "root",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        parentId: "igc",
         isSystem: true,
-    },
-    applications: {
-        id: "applications",
-        name: "Applications",
-        type: "folder",
-        parentId: "root",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        isSystem: true,
-    },
-    pictures: {
-        id: "pictures",
-        name: "Pictures",
-        type: "folder",
-        parentId: "root",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        isSystem: true,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
     },
     trash: {
         id: "trash",
         name: "Trash",
         type: "folder",
-        parentId: "root",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        parentId: "igc",
         isSystem: true,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
     },
-
-    // Initial files inside Desktop
-    "resume-pdf": {
-        id: "resume-pdf",
-        name: "Resume.pdf",
-        type: "pdf",
-        parentId: "desktop",
-        content: "Khalil - Senior Software Engineer\n\nExperience:\n- Full Stack Developer & UI/UX Specialist\n- React, Next.js, TypeScript, Tailwind CSS, Node.js\n\nContact: khalil@portfolio.dev",
-        size: "142 KB",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-    },
-    "projects-folder": {
-        id: "projects-folder",
-        name: "Projects",
+    // Classified folder: absent from the tree until classified_file is unlocked.
+    "classified-folder": {
+        id: "classified-folder",
+        name: "Classified",
         type: "folder",
-        parentId: "desktop",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        parentId: "igc",
+        isSystem: true,
+        locked: false,
+        revealStage: REVEAL_STAGES.classifiedFolder,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
     },
-    "welcome-txt": {
-        id: "welcome-txt",
-        name: "Welcome.txt",
-        type: "text",
-        parentId: "desktop",
-        content: "Welcome to macOS Portfolio 3.0!\n\nYou have full access to this Virtual File System.\n- Create folders and text files\n- Rename, edit, delete or move files\n- Import real files from your computer using the Upload button\n- Open files directly in the built-in Editor / Previewer!",
-        size: "1.2 KB",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+    "logs-folder": {
+        id: "logs-folder",
+        name: "Logs",
+        type: "folder",
+        parentId: "igc",
+        isSystem: true,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
+    },
+    "evidence-folder": {
+        id: "evidence-folder",
+        name: ".evidence",
+        type: "folder",
+        parentId: "igc",
+        isSystem: true,
+        hidden: true,
+        revealStage: REVEAL_STAGES.evidenceFolder,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
     },
 
-    // Files inside Desktop -> Projects
-    "portfolio-code": {
-        id: "portfolio-code",
-        name: "portfolio-v3.tsx",
-        type: "code",
-        parentId: "projects-folder",
-        content: "// Interactive macOS Portfolio Web Application\nimport React from 'react';\n\nexport default function App() {\n  return <div>Welcome to macOS Sequoia</div>;\n}",
-        size: "4.5 KB",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+    // ── Documents children ───────────────────────────────────────────────────
+    "instagram-txt": {
+        id: "instagram-txt",
+        name: "instagram_account.txt",
+        type: "text",
+        parentId: "documents",
+        content: "Instagram Account:\nhttps://www.instagram.com/isitcomgoogleclub2/\n\nNote: Monitor this account for recent activity.",
+        revealStage: REVEAL_STAGES.instagramAccount,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
+    },
+    "classified-file-txt": {
+        id: "classified-file-txt",
+        name: "classified_file.txt",
+        type: "text",
+        parentId: "documents",
+        locked: true,
+        challenge: "classified_file",
+        revealStage: REVEAL_STAGES.classifiedFile,
+        content: "CLASSIFIED - INTERNAL USE ONLY\n\n[This file is password protected]\nPassword obtained from decrypting the encrypted archive.\n\nCONFIDENTIAL CONTENT:\nThe insider has been identified. The attack was coordinated from within.\nAgent codename: SHADOW\nTarget: IGC Internal Network\nMethod: Social Engineering + Insider Access",
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
     },
 
-    // Files inside Documents
-    "about-me-txt": {
-        id: "about-me-txt",
-        name: "About_Me.md",
+    // ── Classified folder children ───────────────────────────────────────────
+    "phone-txt": {
+        id: "phone-txt",
+        name: "mail.txt",
         type: "text",
-        parentId: "documents",
-        content: "# About Khalil\n\nI am a passionate software developer building intuitive, high-performance web experiences.\n\n### Tech Stack:\n- **Frontend**: React, Next.js, TypeScript, Tailwind CSS, Framer Motion\n- **Backend**: Node.js, Express, PostgreSQL, GraphQL\n- **Tools**: Git, Docker, Figma",
-        size: "2.1 KB",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        parentId: "classified-folder",
+        content: "Contact:\nstcmgglclbhr@gmail.com\n\nNote: Email this address to obtain confidential data from the telecom operator.",
+        revealStage: REVEAL_STAGES.phoneNumber,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
     },
-    "ideas-notes": {
-        id: "ideas-notes",
-        name: "Feature_Ideas.txt",
+    "confidential-data-txt": {
+        id: "confidential-data-txt",
+        name: "confidential_data.txt",
         type: "text",
-        parentId: "documents",
-        content: "- Add Virtual File System store (Done!)\n- Full CRUD operations in Finder (Done!)\n- Terminal shell file system integration\n- Drag and drop file upload capability",
-        size: "520 B",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        parentId: "classified-folder",
+        locked: true,
+        challenge: "confidential_data",
+        revealStage: REVEAL_STAGES.confidentialData,
+        content: "CONFIDENTIAL DATA - TELECOM OPERATOR\n\nData obtained from the telecom operator:\nThis file contains sensitive location and timing information related to the security breach.\n\nOpen the Password Vault to cross-check the date, the time and the room.",
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
+    },
+
+    // ── Logs folder children ─────────────────────────────────────────────────
+    "last-activity-log": {
+        id: "last-activity-log",
+        name: "last_activity.log",
+        type: "text",
+        parentId: "logs-folder",
+        // Not a dot-file: from stage 5 it must appear in Finder/Terminal ls and
+        // the sidebar count without the hidden-files toggle being enabled.
+        hidden: false,
+        revealStage: REVEAL_STAGES.lastActivityLog,
+        content: LAST_ACTIVITY_LOG_CONTENT,
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
+    },
+
+    // ── Evidence folder children (dot-files, stage 6) ────────────────────────
+    "evidence-01": {
+        id: "evidence-01",
+        name: "hints.jpg",
+        type: "image",
+        parentId: "evidence-folder",
+        hidden: true,
+        isSystem: true, // CTF evidence: cannot be renamed, moved or deleted
+        revealStage: REVEAL_STAGES.evidenceFiles,
+        content: "hints",
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
+    },
+    "evidence-03": {
+        id: "evidence-03",
+        name: "evidence_03.png",
+        type: "image",
+        parentId: "evidence-folder",
+        hidden: true,
+        isSystem: true,
+        locked: true,
+        challenge: "final_photo",
+        revealStage: REVEAL_STAGES.evidenceFiles,
+        content: "evidence_03",
+        createdAt: timestamp(),
+        updatedAt: timestamp(),
     },
 };
 
@@ -178,15 +245,22 @@ const formatSize = (bytes: number): string => {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+/** Items created by the visitor, preserved across VFS migrations. */
+const isUserItem = (id: string) => /^(folder|file|imported)-/.test(id);
+
+const defaultTree = () => ({
+    items: INITIAL_ITEMS,
+    currentFolderId: "igc",
+    history: ["igc"],
+    historyIndex: 0,
+    selectedItemIds: [] as string[],
+    searchQuery: "",
+});
+
 export const useFileSystemStore = create<FileSystemState>()(
     persist(
         (set, get) => ({
-            items: INITIAL_ITEMS,
-            currentFolderId: "desktop",
-            history: ["desktop"],
-            historyIndex: 0,
-            selectedItemIds: [],
-            searchQuery: "",
+            ...defaultTree(),
 
             setCurrentFolder: (folderId: string) => {
                 const { items, history, historyIndex } = get();
@@ -227,11 +301,11 @@ export const useFileSystemStore = create<FileSystemState>()(
                 }
             },
 
-            setSearchQuery: (searchQuery: string) => set({ searchQuery }),
+            setSearchQuery: (searchQuery) => set({ searchQuery }),
 
-            setSelectedItemIds: (selectedItemIds: string[]) => set({ selectedItemIds }),
+            setSelectedItemIds: (selectedItemIds) => set({ selectedItemIds }),
 
-            toggleSelectItem: (id: string, multi = false) => {
+            toggleSelectItem: (id, multi = false) => {
                 const { selectedItemIds } = get();
                 if (multi) {
                     if (selectedItemIds.includes(id)) {
@@ -244,9 +318,9 @@ export const useFileSystemStore = create<FileSystemState>()(
                 }
             },
 
-            createFolder: (parentId: string, name: string) => {
+            createFolder: (parentId, name) => {
                 const id = `folder-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-                const now = new Date().toISOString();
+                const now = timestamp();
                 const newFolder: FSItem = {
                     id,
                     name: name.trim() || "Untitled Folder",
@@ -265,9 +339,9 @@ export const useFileSystemStore = create<FileSystemState>()(
                 return id;
             },
 
-            createFile: (parentId: string, name: string, content = "", type: FSItemType = "text") => {
+            createFile: (parentId, name, content = "", type = "text") => {
                 const id = `file-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-                const now = new Date().toISOString();
+                const now = timestamp();
                 const bytes = new Blob([content]).size;
                 const newFile: FSItem = {
                     id,
@@ -289,7 +363,7 @@ export const useFileSystemStore = create<FileSystemState>()(
                 return id;
             },
 
-            deleteItem: (id: string) => {
+            deleteItem: (id) => {
                 const { items } = get();
                 const item = items[id];
                 if (!item || item.isSystem) return; // Protect root system folders
@@ -320,7 +394,7 @@ export const useFileSystemStore = create<FileSystemState>()(
                             [id]: {
                                 ...item,
                                 parentId: "trash",
-                                updatedAt: new Date().toISOString(),
+                                updatedAt: timestamp(),
                             },
                         },
                         selectedItemIds: get().selectedItemIds.filter((itemId) => itemId !== id),
@@ -328,10 +402,10 @@ export const useFileSystemStore = create<FileSystemState>()(
                 }
             },
 
-            renameItem: (id: string, newName: string) => {
+            renameItem: (id, newName) => {
                 const { items } = get();
                 const item = items[id];
-                if (!item || !newName.trim()) return;
+                if (!item || item.isSystem || !newName.trim()) return;
 
                 set({
                     items: {
@@ -339,16 +413,16 @@ export const useFileSystemStore = create<FileSystemState>()(
                         [id]: {
                             ...item,
                             name: newName.trim(),
-                            updatedAt: new Date().toISOString(),
+                            updatedAt: timestamp(),
                         },
                     },
                 });
             },
 
-            updateFileContent: (id: string, content: string) => {
+            updateFileContent: (id, content) => {
                 const { items } = get();
                 const item = items[id];
-                if (!item || item.type === "folder") return;
+                if (!item || item.isSystem || item.type === "folder") return;
 
                 const bytes = new Blob([content]).size;
                 set({
@@ -358,17 +432,17 @@ export const useFileSystemStore = create<FileSystemState>()(
                             ...item,
                             content,
                             size: formatSize(bytes),
-                            updatedAt: new Date().toISOString(),
+                            updatedAt: timestamp(),
                         },
                     },
                 });
             },
 
-            moveItem: (id: string, targetFolderId: string) => {
+            moveItem: (id, targetFolderId) => {
                 const { items } = get();
                 const item = items[id];
                 const targetFolder = items[targetFolderId];
-                if (!item || !targetFolder || targetFolder.type !== "folder" || id === targetFolderId) return;
+                if (!item || item.isSystem || !targetFolder || targetFolder.type !== "folder" || id === targetFolderId) return;
 
                 set({
                     items: {
@@ -376,15 +450,15 @@ export const useFileSystemStore = create<FileSystemState>()(
                         [id]: {
                             ...item,
                             parentId: targetFolderId,
-                            updatedAt: new Date().toISOString(),
+                            updatedAt: timestamp(),
                         },
                     },
                 });
             },
 
-            importFile: (parentId: string, name: string, content: string, size?: string, type: FSItemType = "file") => {
+            importFile: (parentId, name, content, size, type = "file") => {
                 const id = `imported-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
-                const now = new Date().toISOString();
+                const now = timestamp();
                 const importedItem: FSItem = {
                     id,
                     name,
@@ -406,18 +480,46 @@ export const useFileSystemStore = create<FileSystemState>()(
             },
 
             resetToDefault: () => {
-                set({
-                    items: INITIAL_ITEMS,
-                    currentFolderId: "desktop",
-                    history: ["desktop"],
-                    historyIndex: 0,
-                    selectedItemIds: [],
-                    searchQuery: "",
-                });
+                set({ ...defaultTree() });
             },
         }),
         {
             name: "macos-filesystem-storage",
+            // v6: instagram_account.txt points at the current club account and
+            // phone_number.txt became mail.txt (the operator is reached by email).
+            version: 6,
+            /**
+             * Restore/refresh every canonical CTF item from INITIAL_ITEMS (so a
+             * stage-5 file that was flagged hidden or stored under a stale version
+             * reappears), while keeping every runtime item the visitor created.
+             */
+            migrate: (persisted) => {
+                const previous = (persisted ?? {}) as Partial<FileSystemState>;
+                const migratedItems: Record<string, FSItem> = { ...(previous.items ?? {}) };
+
+                // v5: evidence_02.jpg is retired, evidence_01.jpg is now shown
+                // as hints.jpg. Do it explicitly so stale saves cannot resurrect
+                // the old entry or keep the old display name.
+                delete migratedItems["evidence-02"];
+                const staleHints = migratedItems["evidence-01"];
+                if (staleHints) {
+                    migratedItems["evidence-01"] = {
+                        ...staleHints,
+                        ...INITIAL_ITEMS["evidence-01"],
+                        createdAt: staleHints.createdAt,
+                    };
+                }
+
+                const userItems = Object.fromEntries(
+                    Object.entries(migratedItems).filter(([id]) => isUserItem(id))
+                );
+
+                return {
+                    ...defaultTree(),
+                    // INITIAL_ITEMS first: canonical CTF ids win over stale copies.
+                    items: { ...INITIAL_ITEMS, ...userItems },
+                };
+            },
         }
     )
 );
